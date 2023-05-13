@@ -1,0 +1,113 @@
+// SPDX-License-Identifier: GPL-3.0
+pragma solidity >=0.5.0 <0.7.0;
+pragma experimental ABIEncoderV2;
+
+contract Hospital {
+    address public hospital;  // 醫院地址（合約發起者）
+
+    struct Doctor {
+        string name;
+        string registrationNumber;
+        string residenceAddress;
+    }
+
+    struct Patient {
+        string name;
+        string id;
+        string birthday;
+        string email;
+        address patientAddress;
+        bool isExisted;
+        uint256[] recordIds;  // 新增的記錄病患病歷 ID 的陣列
+        mapping(uint256 => Record) records;
+        uint256 recordCount;
+    }
+
+    struct Record {
+        string content;
+        uint256 timestamp;
+    }
+
+    mapping(address => Doctor) public doctors;
+    mapping(address => Patient) public patients;
+    mapping(address => mapping(address => bool)) public authorizations;
+
+    modifier onlyHospital {
+        require(msg.sender == hospital, "只有醫院合約可以執行該操作");
+        _;
+    }
+    modifier onlyDoctor {
+        require(bytes(doctors[msg.sender].name).length != 0, "只有醫生可以執行該操作");
+        _;
+    }
+
+    constructor() public {
+        hospital = msg.sender;
+    }
+
+    function addDoctor(address doctorAddress, string memory name, string memory registrationNumber, string memory residenceAddress) public onlyHospital {
+        Doctor storage doctor = doctors[doctorAddress];
+        doctor.name = name;
+        doctor.registrationNumber = registrationNumber;
+        doctor.residenceAddress = residenceAddress;
+    }
+
+    function addPatient(address patientAddress, string memory name, string memory id, string memory birthday, string memory email) public onlyHospital {
+        require(!patients[patientAddress].isExisted, "病患資料已存在");
+
+        Patient storage patient = patients[patientAddress];
+        patient.name = name;
+        patient.id = id;
+        patient.birthday=birthday;
+        patient.email = email;
+        patient.isExisted = true;
+        patient.patientAddress = patientAddress;
+    }
+
+    function addRecord(address paddr, string memory _pEtiology) public onlyDoctor returns (uint) {
+        require(patients[paddr].isExisted == true, "病患資料不存在");
+
+        Patient storage patient = patients[paddr];
+        uint256 recordId = patient.recordCount + 1;
+        patient.records[recordId] = Record(_pEtiology, block.timestamp);
+        patient.recordIds.push(recordId);
+        patient.recordCount = recordId;
+
+        return recordId;
+    }
+
+    function applyRecord(address hospitalAddress, address patientAddress) public view returns (string memory) {
+        require(patients[patientAddress].isExisted, "病患資料不存在");
+        require(authorizations[hospitalAddress][patientAddress], "未獲得授權");
+
+        Patient storage patient = patients[patientAddress];
+        uint256 latestRecordId = getLatestRecordId(patientAddress);
+        return patient.records[latestRecordId].content;
+    }
+
+    function getLatestRecordId(address patientAddress) private view returns (uint256) {
+        require(patients[patientAddress].isExisted, "病患資料不存在");
+
+        Patient storage patient = patients[patientAddress];
+        require(patient.recordIds.length > 0, "病歷記錄不存在");
+
+        uint256 latestRecordId = patient.recordIds[patient.recordIds.length - 1];
+        return latestRecordId;
+    }
+
+    function shareRecordHash(address patientAddress) public view returns (bytes32) {
+        require(patients[patientAddress].isExisted, "病患資料不存在");
+
+        Patient storage patient = patients[patientAddress];
+        uint256 latestRecordId = getLatestRecordId(patientAddress);
+        string memory recordContent = patient.records[latestRecordId].content;
+        bytes32 recordHash = keccak256(abi.encodePacked(recordContent));
+        return recordHash;
+    }
+
+    function authorizeHospital(address hospitalAddress, address patientAddress) public onlyHospital {
+        require(patients[patientAddress].isExisted, "病患資料不存在");
+
+        authorizations[hospitalAddress][patientAddress] = true;
+    }
+}
